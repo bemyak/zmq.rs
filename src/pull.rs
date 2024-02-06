@@ -5,7 +5,7 @@ use crate::transport::AcceptStopHandle;
 use crate::util::PeerIdentity;
 use crate::{
     Endpoint, MultiPeerBackend, Socket, SocketEvent, SocketOptions, SocketRecv, SocketType,
-    ZmqMessage, ZmqResult,
+    ZmqError, ZmqMessage, ZmqResult,
 };
 
 use async_trait::async_trait;
@@ -55,17 +55,14 @@ impl Socket for PullSocket {
 #[async_trait]
 impl SocketRecv for PullSocket {
     async fn recv(&mut self) -> ZmqResult<ZmqMessage> {
-        loop {
-            match self.fair_queue.next().await {
-                Some((_peer_id, Ok(Message::Message(message)))) => {
-                    return Ok(message);
-                }
-                Some((_peer_id, Ok(msg))) => todo!("Unimplemented message: {:?}", msg),
-                Some((peer_id, Err(_))) => {
-                    self.backend.peer_disconnected(&peer_id);
-                }
-                None => todo!(),
-            };
+        match self.fair_queue.next().await {
+            Some((_peer_id, Ok(Message::Message(message)))) => Ok(message),
+            Some((peer_id, Ok(msg))) => Err(ZmqError::InvalidMessage { peer_id, msg }),
+            Some((peer_id, Err(err))) => {
+                self.backend.peer_disconnected(&peer_id);
+                Err(ZmqError::Codec(err))
+            }
+            None => Err(ZmqError::NoMessage),
         }
     }
 }

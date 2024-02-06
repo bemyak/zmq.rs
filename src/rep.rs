@@ -145,29 +145,26 @@ impl SocketSend for RepSocket {
 #[async_trait]
 impl SocketRecv for RepSocket {
     async fn recv(&mut self) -> ZmqResult<ZmqMessage> {
-        loop {
-            match self.fair_queue.next().await {
-                Some((peer_id, Ok(message))) => match message {
-                    Message::Message(mut m) => {
-                        assert!(m.len() > 1);
-                        let mut at = 1;
-                        for (index, frame) in m.iter().enumerate() {
-                            if frame.is_empty() {
-                                // Include delimiter in envelope.
-                                at = index + 1;
-                                break;
-                            }
-                        }
-                        let data = m.split_off(at);
-                        self.envelope = Some(m);
-                        self.current_request = Some(peer_id);
-                        return Ok(data);
+        match self.fair_queue.next().await {
+            Some((peer_id, Ok(Message::Message(mut msg)))) => {
+                assert!(msg.len() > 1);
+                let mut at = 1;
+                for (index, frame) in msg.iter().enumerate() {
+                    if frame.is_empty() {
+                        // Include delimiter in envelope.
+                        at = index + 1;
+                        break;
                     }
-                    _ => todo!(),
-                },
-                Some((_peer_id, _)) => todo!(),
-                None => return Err(ZmqError::NoMessage),
-            };
+                }
+                let data = msg.split_off(at);
+                self.envelope = Some(msg);
+                self.current_request = Some(peer_id);
+                Ok(data)
+            }
+            Some((peer_id, Ok(msg))) => Err(ZmqError::InvalidMessage { peer_id, msg }),
+
+            Some((_peer_id, Err(err))) => Err(ZmqError::Codec(err)),
+            None => Err(ZmqError::NoMessage),
         }
     }
 }

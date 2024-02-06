@@ -2,6 +2,7 @@ use crate::codec::{CodecError, Message, ZmtpVersion};
 use crate::endpoint::Endpoint;
 use crate::endpoint::EndpointError;
 use crate::task_handle::TaskError;
+use crate::util::PeerIdentity;
 use crate::ZmqMessage;
 
 use futures_channel::mpsc;
@@ -47,6 +48,8 @@ pub enum ZmqError {
     PeerIdentity,
     #[error("Unsupported ZMTP version")]
     UnsupportedVersion(ZmtpVersion),
+    #[error("Invalid message received from {peer_id:?}: {msg:?}")]
+    InvalidMessage { peer_id: PeerIdentity, msg: Message },
 }
 
 impl From<mpsc::TrySendError<Message>> for ZmqError {
