@@ -1,5 +1,7 @@
 #[cfg(feature = "tokio-runtime")]
-use tokio::net::{TcpListener, TcpStream};
+use stubborn_io::StubbornTcpStream;
+#[cfg(feature = "tokio-runtime")]
+use tokio::net::TcpListener;
 
 #[cfg(feature = "async-std-runtime")]
 use async_std::net::{TcpListener, TcpStream};
@@ -15,7 +17,7 @@ use crate::ZmqResult;
 use futures_util::{select, FutureExt};
 
 pub(crate) async fn connect(host: &Host, port: Port) -> ZmqResult<(FramedIo, Endpoint)> {
-    let raw_socket = TcpStream::connect((host.to_string().as_str(), port)).await?;
+    let raw_socket = StubbornTcpStream::connect((host.to_string(), port)).await?;
     // For some reason set_nodelay doesn't work on windows. See
     // https://github.com/zeromq/zmq.rs/issues/148 for details
     #[cfg(not(windows))]

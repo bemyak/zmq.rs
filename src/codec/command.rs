@@ -60,8 +60,8 @@ impl TryFrom<Bytes> for ZmqCommand {
     fn try_from(mut buf: Bytes) -> Result<Self, Self::Error> {
         let command_len = buf.get_u8() as usize;
         // command-name-char = ALPHA according to https://rfc.zeromq.org/spec:23/ZMTP/
-        let command = match &buf[..command_len] {
-            b"READY" => ZmqCommandName::READY,
+        let command = match buf.get(..command_len) {
+            Some(b"READY") => ZmqCommandName::READY,
             _ => return Err(CodecError::Command("Unknown command received")),
         };
         buf.advance(command_len);

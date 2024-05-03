@@ -14,7 +14,7 @@ tokio-runtime = ["tokio", "tokio-util"]
 async-std-runtime = ["async-std"]
 all-transport = ["ipc-transport", "tcp-transport"]
 ipc-transport = []
-tcp-transport = []
+tcp-transport = ["stubborn-io"]
 
 [dependencies]
 thiserror = "1"
@@ -37,6 +37,7 @@ once_cell = "1"
 log = "0.4"
 asynchronous-codec = "0.7"
 async-std = { version = "1", features = ["attributes"], optional = true }
+stubborn-io = { git = "https://github.com/craftytrickster/stubborn-io.git", branch = "sync-fix", optional = true }
 
 [dev-dependencies]
 chrono = "0.4"
