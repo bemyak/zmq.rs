@@ -6,9 +6,10 @@ use crate::fair_queue::FairQueue;
 use crate::fair_queue::QueueInner;
 use crate::message::ZmqMessage;
 use crate::transport::AcceptStopHandle;
-use crate::util::PeerIdentity;
+use crate::util::{self, PeerIdentity};
 use crate::{
-    MultiPeerBackend, Socket, SocketBackend, SocketEvent, SocketOptions, SocketRecv, SocketType,
+    async_rt, MultiPeerBackend, Socket, SocketBackend, SocketEvent, SocketOptions, SocketRecv,
+    SocketType,
 };
 
 use async_trait::async_trait;
@@ -35,6 +36,7 @@ pub(crate) struct SubSocketBackend {
     socket_options: SocketOptions,
     pub(crate) socket_monitor: Mutex<Option<mpsc::Sender<SocketEvent>>>,
     subs: Mutex<HashSet<String>>,
+    connect_endpoints: DashMap<PeerIdentity, Endpoint>,
 }
 
 impl SubSocketBackend {
@@ -51,6 +53,7 @@ impl SubSocketBackend {
             socket_options: options,
             socket_monitor: Mutex::new(None),
             subs: Mutex::new(HashSet::new()),
+            connect_endpoints: DashMap::new(),
         }
     }
 
@@ -104,16 +107,44 @@ impl MultiPeerBackend for SubSocketBackend {
 
         self.peers.insert(peer_id.clone(), Peer { send_queue });
         self.round_robin.push(peer_id.clone());
-        match &self.fair_queue_inner {
-            None => {}
-            Some(inner) => {
-                inner.lock().insert(peer_id.clone(), recv_queue);
-            }
-        };
+
+        if let Some(queue_inner) = &self.fair_queue_inner {
+            queue_inner.lock().insert(peer_id.clone(), recv_queue);
+        }
+
+        if let Some(e) = endpoint {
+            self.connect_endpoints.insert(peer_id.clone(), e);
+        }
     }
 
     fn peer_disconnected(self: Arc<Self>, peer_id: &PeerIdentity) {
+        if let Some(monitor) = self.monitor().lock().as_mut() {
+            let _ = monitor.try_send(SocketEvent::Disconnected(peer_id.clone()));
+        }
+
         self.peers.remove(peer_id);
+
+        if let Some(inner) = &self.fair_queue_inner {
+            inner.lock().remove(peer_id);
+        }
+
+        let endpoint = match self.connect_endpoints.remove(peer_id) {
+            Some((_, e)) => e,
+            None => return,
+        };
+        let backend = self;
+
+        async_rt::task::spawn(async move {
+            let (socket, endpoint) = util::connect_forever(endpoint)
+                .await
+                .expect("Failed to connect");
+            let peer_id = util::peer_connected(socket, backend.clone(), Some(endpoint.clone()))
+                .await
+                .expect("Failed to handshake");
+            if let Some(monitor) = backend.monitor().lock().as_mut() {
+                let _ = monitor.try_send(SocketEvent::Connected(endpoint, peer_id));
+            }
+        });
     }
 }
 
@@ -200,7 +231,18 @@ impl SocketRecv for SubSocket {
                 Some((peer_id, Err(_))) => {
                     self.backend.clone().peer_disconnected(&peer_id);
                 }
-                None => todo!(),
+                None => {
+                    // All clients disconnected
+                    let backend = self.backend.clone();
+                    let mut peer_ids = Vec::with_capacity(backend.peers.len());
+                    for peer in &backend.peers {
+                        let peer_id = peer.key().clone();
+                        peer_ids.push(peer_id);
+                    }
+                    for peer_id in peer_ids {
+                        backend.clone().peer_disconnected(&peer_id);
+                    }
+                }
             }
         }
     }
