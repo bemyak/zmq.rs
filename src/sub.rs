@@ -135,16 +135,24 @@ impl MultiPeerBackend for SubSocketBackend {
         let backend = self;
 
         async_rt::task::spawn(async move {
-            let (socket, endpoint) = util::connect_forever(endpoint)
-                .await
-                .expect("Failed to connect");
-            let peer_id = util::peer_connected(socket, backend.clone(), Some(endpoint.clone()))
-                .await
-                .expect("Failed to handshake");
+            let peer_id = loop {
+                let Ok((socket, endpoint)) = util::connect_forever(endpoint.clone()).await else {
+                    continue;
+                };
+                let Ok(peer_id) =
+                    util::peer_connected(socket, backend.clone(), Some(endpoint.clone())).await
+                else {
+                    continue;
+                };
+                break peer_id;
+            };
             if let Some(monitor) = backend.monitor().lock().as_mut() {
                 let _ = monitor.try_send(SocketEvent::Connected(endpoint, peer_id));
             }
         });
+
+        // HACK: For some reason, the previous task sometimes doesn't run unless we spawn a new task
+        async_rt::task::spawn(async { });
     }
 }
 
